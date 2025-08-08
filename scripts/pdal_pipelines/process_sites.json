@@ -1,0 +1,29 @@
+[
+    {
+        "type": "readers.las",
+        "filename": "{{ input_path }}"
+    },
+    {
+        "type": "filters.reprojection",
+        "out_srs": "EPSG:7855+5711"
+    },
+    {
+        "type": "filters.crop",
+        "polygon": "{{ geometry_wkt }}"
+    },
+    {
+        "type": "filters.hag_nn"
+    },
+    {
+        "type": "filters.outlier",
+        "method": "statistical",
+        "mean_k": 6,
+        "multiplier": 10
+    },
+    {
+        "type": "writers.copc",
+        "filename": "{{ output_path }}",
+        "forward": "scale,offset",
+        "extra_dims": "all"
+    }
+]
