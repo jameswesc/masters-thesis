@@ -1,11 +1,13 @@
-def add_suffix(obj: dict, suffix: str | None = None):
+def add_suffix(obj: dict, suffix: str | list[str] | None = None):
     """Add suffix to all keys in a dictionary if suffix is provided."""
     if suffix is None:
         return obj
+    elif isinstance(suffix, list):
+        suffix = ','.join(suffix)
     
     obj_with_suffix = {}
     for k, v in obj.items():
-        obj_with_suffix[f"{k}_{suffix}"] = v
+        obj_with_suffix[f"{k}[{suffix}]"] = v
     
     return obj_with_suffix
 
