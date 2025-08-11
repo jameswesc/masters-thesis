@@ -8,9 +8,6 @@ dependencies = [
     "click>=8.0.0,<9"
 ]
 
-[project.scripts]
-forest-tools = "forest_structure_tools.cli:cli"
-
 [build-system]
 build-backend = "hatchling.build"
 requires = ["hatchling"]

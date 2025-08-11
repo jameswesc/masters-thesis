@@ -148,7 +148,9 @@ def percent_in(
         lmask = z >= lt if inclusive[0] else z > lt
         umask = z <= ut if inclusive[1] else z < ut
 
-        metrics[f"%in_{llab}{lt},{ut}m{ulab}"] = zw[lmask & umask].sum() / total * 100
+        metrics[f"%inside_{llab}{lt},{ut}m{ulab}"] = (
+            zw[lmask & umask].sum() / total * 100
+        )
 
     return metrics
 
@@ -173,6 +175,6 @@ def relative_height_profile_metrics(
     labels[-1] = labels[-1].replace("%)", "%]")
 
     for label, count, density in zip(labels, counts, densities):
-        metrics[f"%in_{label}"] = count / total * 100
+        metrics[f"%inside_{label}"] = count / total * 100
 
     return metrics

@@ -1558,7 +1558,7 @@ packages:
 - pypi: ./
   name: forest-structure-tools
   version: 0.1.0
-  sha256: ea225d9b43c571981ca38398d8c27a987eb2c40cb6d0309165c6c291a9399471
+  sha256: 4107f709a3cafacd05b9d11ac7ce45c278498eb73f6c0d249fd022ddec490f39
   requires_dist:
   - rich>=14.1.0,<15
   - click>=8.0.0,<9
