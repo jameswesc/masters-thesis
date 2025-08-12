@@ -1,13 +1,12 @@
-def add_suffix(obj: dict, suffix: str | list[str] | None = None):
+Suffix = str | list[str] | None
+
+
+def add_suffix(obj: dict, suffix: Suffix = None):
     """Add suffix to all keys in a dictionary if suffix is provided."""
     if suffix is None:
         return obj
-    elif not isinstance(suffix, list):
-        suffix = [suffix]
-
-    # e.g.  suffix or 'w' becomes "[w]"
-    #       suffix of ['w', 'v'] becomes "[w, v]"
-    suffix = str(suffix)
+    elif isinstance(suffix, list):
+        suffix = ",".join(suffix)
 
     obj_with_suffix = {}
     for k, v in obj.items():
@@ -19,7 +18,7 @@ def add_suffix(obj: dict, suffix: str | list[str] | None = None):
 def with_suffix(func):
     """Decorator that adds suffix parameter support to metrics functions."""
 
-    def wrapper(*args, suffix: str | None = None, **kwargs):
+    def wrapper(*args, suffix: Suffix, **kwargs):
         result = func(*args, **kwargs)
         return add_suffix(result, suffix)
 
