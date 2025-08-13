@@ -1,7 +1,6 @@
-Suffix = str | list[str] | None
+from .typing import Suffix
 
-
-def add_suffix(obj: dict, suffix: Suffix = None):
+def add_suffix(obj: dict, suffix: Suffix | None = None):
     """Add suffix to all keys in a dictionary if suffix is provided."""
     if suffix is None:
         return obj
@@ -13,13 +12,3 @@ def add_suffix(obj: dict, suffix: Suffix = None):
         obj_with_suffix[f"{k}[{suffix}]"] = v
 
     return obj_with_suffix
-
-
-def with_suffix(func):
-    """Decorator that adds suffix parameter support to metrics functions."""
-
-    def wrapper(*args, suffix: Suffix, **kwargs):
-        result = func(*args, **kwargs)
-        return add_suffix(result, suffix)
-
-    return wrapper

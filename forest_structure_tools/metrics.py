@@ -3,23 +3,23 @@ import numpy.typing as npt
 
 import xarray as xr
 
-from .utils import with_suffix, Suffix, add_suffix
+from .utils import  add_suffix
+from .typing import Percentages, Suffix
 
-from typing import Literal, Optional, Tuple, List
-
-Op = Literal["at", "above", "below", "above_inc", "below_inc", "inside", "inside_inc"]
-PercentageConfig = Tuple[Op, int, Optional[int]]
-Percentages = List[PercentageConfig]
 
 default_percentiles = np.arange(10, 100, 10)
 default_percentages: Percentages = [
     ("at", 0),
     ("above", 1.5),
     ("inside", 0, 1),
+    ("inside", 1, 5),
+    ("inside", 5, 10),
+    ("inside", 10, 30),
+    ("above", 30)
 ]
 
 
-def forest_structure_ds(
+def forest_structure_metrics(
     z: npt.NDArray,
     x: npt.NDArray | None = None,
     y: npt.NDArray | None = None,
@@ -29,7 +29,7 @@ def forest_structure_ds(
     include_basic=True,
     percentiles: npt.NDArray[np.integer] = default_percentiles,
     percentages: Percentages | None = default_percentages,
-    suffix: Suffix = None,
+    suffix: Suffix | None = None,
 ):
     point_ds_data_vars = {"z": ("point_idx", z)}
 
@@ -89,7 +89,7 @@ def forest_z_metrics_ds(
     percentiles: npt.NDArray[np.integer] = None,
     percentages: Percentages | None = None,
     z_bin_size: float | None = None,
-    suffix: Suffix = None,
+    suffix: Suffix | None = None,
 ):
     z = points_ds["z"].values
     weights = points_ds["weights"].values
@@ -170,7 +170,7 @@ def z_bin_metrics(
 
     # Set any mising counts as nan instead of 0
     inside[inside == 0] = np.nan
-    inside_p = inside / total * 100
+    inside_p = inside / total
     entries = inside.cumsum()
     # No values exit the ground
     # Use nan to avoid infinities
@@ -180,16 +180,21 @@ def z_bin_metrics(
     vad = -np.log(ppi) * (1 / k) * (1 / z_bin_size)
     vai = np.nansum(vad)
 
+    fhd =  - np.sum(inside_p * np.log(inside_p))
+    norm_fhd = fhd / len(inside_p)
+
     # Tuple metrics mean they are along
     # dimension z (i.e. 1D metrics - an array)
     metrics = {
         "inside": ("z", inside),
-        "inside_%": ("z", inside_p),
-        "entries": ("z", entries),
+        "inside_%": ("z", inside_p * 100),
+        "entries": ("z", entries), 
         "exits": ("z", exits),
         "ppi": ("z", ppi),
         "vad": ("z", vad),
         "vai": vai,
+        "fhd": fhd,
+        "norm_fhd": norm_fhd
     }
 
     coords = {"z": bins}
