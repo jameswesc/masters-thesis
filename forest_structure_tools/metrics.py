@@ -205,12 +205,10 @@ def z_bin_metrics(
     vad = -np.log(ppi) / z_bin_size
     vai = np.nansum(vad) * z_bin_size
 
-    # This should be the same as entropy
+    fhd = entropy(inside_p, nan_policy="omit")
+
     with np.errstate(divide="ignore", invalid="ignore"):
-        shannons_div_inside_p = -np.sum(inside_p * np.log(inside_p))
-        norm_shannons_div_inside_p = shannons_div_inside_p / np.log(
-            (inside_p > 0).sum()
-        )
+        norm_fhd = fhd / np.log(((~np.isnan(inside_p)) & (inside_p > 0)).sum())
 
     cv_inside = cv(inside)
     cv_inside_p = cv(inside_p)
@@ -225,8 +223,8 @@ def z_bin_metrics(
         "ppi": ("z", ppi),
         "vad": ("z", vad),
         "vai": vai,
-        "fhd": shannons_div_inside_p,
-        "norm_fhd": norm_shannons_div_inside_p,
+        "fhd": fhd,
+        "norm_fhd": norm_fhd,
         "cv_inside": cv_inside,
         "cv_inside_p": cv_inside_p,
         "cv_ppi": cv_ppi,
