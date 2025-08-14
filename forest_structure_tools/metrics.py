@@ -30,7 +30,6 @@ def forest_structure_metrics(
     percentiles: npt.NDArray[np.integer] = default_percentiles,
     percentages: Percentages | None = default_percentages,
     suffix: Suffix | None = None,
-    skip_encodings=False,
 ):
     point_ds_data_vars = {"z": ("point_idx", z)}
 
@@ -155,7 +154,6 @@ def z_bin_metrics(
     z: npt.NDArray[np.floating],
     z_bin_size: float,
     weights: npt.NDArray[np.floating] | None = None,
-    k=1,
 ):
     if weights is None:
         weights = np.ones(len(z))
@@ -190,28 +188,32 @@ def z_bin_metrics(
     exits = np.concat(([np.nan], entries[:-1]))
     ppi = exits / entries
 
-    vad = -np.log(ppi) / k
-    vad_norm = vad / z_bin_size
+    # Not in some literature k is used
+    # however, its just a scalar so it can be applied in post if we want
+    # similarly dz - though i think dz actually messes with the calculation
+    # of vai and should not be used
+    vad = -np.log(ppi)
     vai = np.nansum(vad)
 
     fhd = -np.sum(inside_p * np.log(inside_p))
-    norm_fhd = fhd / len(inside_p)
 
     # Compute VAI profiles
-    vai_profile = np.zeros(len(bins))
-    vai_slice = np.zeros(len(bins))
+    # THESE ARE THE SAME AS VAD AND VAI done
+    # that way
+    # vai_profile = np.zeros(len(bins))
+    # vai_slice = np.zeros(len(bins))
 
-    for i, threshold in enumerate(bins):
-        count_lte = weights[z <= threshold].sum()
-        if count_lte > 0:
-            vai_profile[i] = -np.log(count_lte / total) * (1 / k)
-        else:
-            vai_profile[i] = np.nan
+    # for i, threshold in enumerate(bins):
+    #     count_lte = weights[z <= threshold].sum()
+    #     if count_lte > 0:
+    #         vai_profile[i] = -np.log(count_lte / total) * (1 / k)
+    #     else:
+    #         vai_profile[i] = np.nan
 
-    vai_slice[0] = np.nan
-    for i, vai in enumerate(vai_profile[:-1]):
-        vai_above = vai_profile[i + 1]
-        vai_slice[i + 1] = vai - vai_above
+    # vai_slice[0] = np.nan
+    # for i, vai in enumerate(vai_profile[:-1]):
+    #     vai_above = vai_profile[i + 1]
+    #     vai_slice[i + 1] = vai - vai_above
 
     # Tuple metrics mean they are along
     # dimension z (i.e. 1D metrics - an array)
@@ -219,13 +221,11 @@ def z_bin_metrics(
         "inside": ("z", inside),
         "inside_pct": ("z", inside_p * 100),
         "entries": ("z", entries),
-        "entries_pct": ("z", entries_pct),
         "exits": ("z", exits),
         "ppi": ("z", ppi),
-        "vad_norm": ("z", vad_norm),
         "vad": ("z", vad),
-        "vai_profile": ("z", vai_profile),
-        "vai_slice": ("z", vai_slice),
+        # "vai_profile": ("z", vai_profile),
+        # "vai_slice": ("z", vai_slice),
         "vai": vai,
         "fhd": fhd,
         "norm_fhd": norm_fhd,
