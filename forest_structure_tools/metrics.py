@@ -3,8 +3,9 @@ import numpy.typing as npt
 
 import xarray as xr
 
-from .utils import add_suffix
-from .typing import Percentages, Suffix
+from scipy.stats import kurtosis, skew, entropy, lmoment
+from .typing import Percentages
+from .gini import gini
 
 
 default_percentiles = np.arange(10, 100, 10)
@@ -29,7 +30,6 @@ def forest_structure_metrics(
     include_basic=True,
     percentiles: npt.NDArray[np.integer] = default_percentiles,
     percentages: Percentages | None = default_percentages,
-    suffix: Suffix | None = None,
 ):
     point_ds_data_vars = {"z": ("point_idx", z)}
 
@@ -52,7 +52,6 @@ def forest_structure_metrics(
         "percentiles": percentiles,
         "percentages": percentages,
         "z_bin_size": z_bin_size,
-        "suffix": suffix,
     }
 
     if xy_bin_size is None:
@@ -94,7 +93,6 @@ def forest_z_metrics_ds(
     percentiles: npt.NDArray[np.integer] = None,
     percentages: Percentages | None = None,
     z_bin_size: float | None = None,
-    suffix: Suffix | None = None,
 ):
     z = points_ds["z"].values
     weights = points_ds["weights"].values
@@ -116,9 +114,15 @@ def forest_z_metrics_ds(
         metrics |= m
         coords |= c
 
-    metrics = add_suffix(metrics, suffix)
-
     return xr.Dataset(data_vars=metrics, coords=coords)
+
+
+def cv(x: npt.NDArray) -> float:
+    valid_x = x[~np.isnan(x)]
+    if len(valid_x) >= 2 and valid_x.mean() != 0:
+        return valid_x.std() / valid_x.mean()
+    else:
+        return np.nan
 
 
 def basic_z_metrics(z: npt.NDArray[np.floating]):
@@ -128,11 +132,15 @@ def basic_z_metrics(z: npt.NDArray[np.floating]):
     mean = z.mean()
     median = np.median(z)
     sd = z.std()
-    with np.errstate(divide="ignore", invalid="ignore"):
-        cv = sd / mean
-    # skew = skew(veg)  - TODO check these do what you think they do
-    # kurt = kurtosis(veg) - TODO check these do what you think they do
     var = z.var()
+    cv_val = cv(z)
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        crr = (mean - min) / range
+
+    skew_val = skew(z)  # TODO check these do what you think they do
+    kurt_val = kurtosis(z)  # TODO check these do what you think they do
+    gini_val = gini(z)
 
     metrics = {
         "max": max,
@@ -142,9 +150,11 @@ def basic_z_metrics(z: npt.NDArray[np.floating]):
         "median": median,
         "sd": sd,
         "var": var,
-        "cv": cv,
-        # "skew": skew,
-        # "kurt": kurt,
+        "cv": cv_val,
+        "crr": crr,
+        "skew": skew_val,
+        "kurt": kurt_val,
+        "gini": gini_val,
     }
 
     return metrics
@@ -181,7 +191,7 @@ def z_bin_metrics(
     entries = np.nancumsum(inside)
     entries[:first_valid_value] = np.nan
 
-    entries_pct = entries / total * 100
+    # entries_pct = entries / total * 100
 
     # No values exit the ground
     # Use nan to avoid infinities
@@ -192,43 +202,35 @@ def z_bin_metrics(
     # however, its just a scalar so it can be applied in post if we want
     # similarly dz - though i think dz actually messes with the calculation
     # of vai and should not be used
-    vad = -np.log(ppi)
-    vai = np.nansum(vad)
+    vad = -np.log(ppi) / z_bin_size
+    vai = np.nansum(vad) * z_bin_size
 
-    fhd = -np.sum(inside_p * np.log(inside_p))
+    # This should be the same as entropy
+    with np.errstate(divide="ignore", invalid="ignore"):
+        shannons_div_inside_p = -np.sum(inside_p * np.log(inside_p))
+        norm_shannons_div_inside_p = shannons_div_inside_p / np.log(
+            (inside_p > 0).sum()
+        )
 
-    # Compute VAI profiles
-    # THESE ARE THE SAME AS VAD AND VAI done
-    # that way
-    # vai_profile = np.zeros(len(bins))
-    # vai_slice = np.zeros(len(bins))
-
-    # for i, threshold in enumerate(bins):
-    #     count_lte = weights[z <= threshold].sum()
-    #     if count_lte > 0:
-    #         vai_profile[i] = -np.log(count_lte / total) * (1 / k)
-    #     else:
-    #         vai_profile[i] = np.nan
-
-    # vai_slice[0] = np.nan
-    # for i, vai in enumerate(vai_profile[:-1]):
-    #     vai_above = vai_profile[i + 1]
-    #     vai_slice[i + 1] = vai - vai_above
+    cv_inside = cv(inside)
+    cv_inside_p = cv(inside_p)
+    cv_ppi = cv(ppi)
+    cv_vad = cv(vad)
 
     # Tuple metrics mean they are along
     # dimension z (i.e. 1D metrics - an array)
     metrics = {
         "inside": ("z", inside),
         "inside_pct": ("z", inside_p * 100),
-        "entries": ("z", entries),
-        "exits": ("z", exits),
         "ppi": ("z", ppi),
         "vad": ("z", vad),
-        # "vai_profile": ("z", vai_profile),
-        # "vai_slice": ("z", vai_slice),
         "vai": vai,
-        "fhd": fhd,
-        "norm_fhd": norm_fhd,
+        "fhd": shannons_div_inside_p,
+        "norm_fhd": norm_shannons_div_inside_p,
+        "cv_inside": cv_inside,
+        "cv_inside_p": cv_inside_p,
+        "cv_ppi": cv_ppi,
+        "cv_vad": cv_vad,
     }
 
     coords = {"z": bins}
