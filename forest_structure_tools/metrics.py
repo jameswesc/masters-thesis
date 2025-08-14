@@ -3,7 +3,7 @@ import numpy.typing as npt
 
 import xarray as xr
 
-from .utils import  add_suffix
+from .utils import add_suffix
 from .typing import Percentages, Suffix
 
 
@@ -15,7 +15,7 @@ default_percentages: Percentages = [
     ("inside", 1, 5),
     ("inside", 5, 10),
     ("inside", 10, 30),
-    ("above", 30)
+    ("above", 30),
 ]
 
 
@@ -25,11 +25,12 @@ def forest_structure_metrics(
     y: npt.NDArray | None = None,
     weights: npt.NDArray | None = None,
     xy_bin_size: float | None = None,
-    z_bin_size: float | None = None,
+    z_bin_size: float | None = 1,
     include_basic=True,
     percentiles: npt.NDArray[np.integer] = default_percentiles,
     percentages: Percentages | None = default_percentages,
     suffix: Suffix | None = None,
+    skip_encodings=False,
 ):
     point_ds_data_vars = {"z": ("point_idx", z)}
 
@@ -40,13 +41,10 @@ def forest_structure_metrics(
         point_ds_data_vars["x"] = ("point_idx", x)
         point_ds_data_vars["y"] = ("point_idx", y)
 
-    was_weighted = weights is None  # For use in attributes later
     if weights is None:
         weights = np.ones(len(z))
 
-    point_ds_data_vars["weights"] = (
-        ("point_idx", weights) if weights is not None else np.ones(len(z))
-    )
+    point_ds_data_vars["weights"] = ("point_idx", weights)
 
     points_ds = xr.Dataset(data_vars=point_ds_data_vars)
 
@@ -61,8 +59,13 @@ def forest_structure_metrics(
     if xy_bin_size is None:
         metrics_ds = forest_z_metrics_ds(points_ds, **forest_z_metrics_kwargs)
     else:
-        x_bins = np.arange(x.min(), x.max() + xy_bin_size, xy_bin_size)
-        y_bins = np.arange(y.min(), y.max() + xy_bin_size, xy_bin_size)
+        # This algins the grid with the xy_bin_size
+        # This ensures that datasets can be merged properly
+        x_min = np.floor(x.min() / xy_bin_size) * xy_bin_size
+        y_min = np.floor(y.min() / xy_bin_size) * xy_bin_size
+
+        x_bins = np.arange(x_min, x.max() + xy_bin_size, xy_bin_size)
+        y_bins = np.arange(y_min, y.max() + xy_bin_size, xy_bin_size)
 
         x_bin_grouper = xr.groupers.BinGrouper(
             bins=x_bins, labels=x_bins[:-1], include_lowest=True
@@ -75,10 +78,13 @@ def forest_structure_metrics(
         metrics_ds = xy_grouping.map(forest_z_metrics_ds, **forest_z_metrics_kwargs)
         metrics_ds = metrics_ds.rename({"x_bins": "x", "y_bins": "y"})
 
-    metrics_ds.attrs["xy_bin_size"] = xy_bin_size
-    metrics_ds.attrs["z_bin_size"] = z_bin_size
-    metrics_ds.attrs["suffix"] = suffix
-    metrics_ds.attrs["was_weighted"] = was_weighted
+    metrics_ds.attrs["xy_bin_size"] = str(xy_bin_size)
+    metrics_ds.attrs["z_bin_size"] = str(z_bin_size)
+
+    # float32 is enough for all my datavars
+    for name, var in metrics_ds.data_vars.items():
+        if var.dtype == "float64":
+            metrics_ds[name] = var.astype("float32")
 
     return metrics_ds
 
@@ -123,8 +129,8 @@ def basic_z_metrics(z: npt.NDArray[np.floating]):
     mean = z.mean()
     median = np.median(z)
     sd = z.std()
-    # TODO - suppress expected warning when nans
-    cv = sd / mean
+    with np.errstate(divide="ignore", invalid="ignore"):
+        cv = sd / mean
     # skew = skew(veg)  - TODO check these do what you think they do
     # kurt = kurtosis(veg) - TODO check these do what you think they do
     var = z.var()
@@ -171,30 +177,58 @@ def z_bin_metrics(
     # Set any mising counts as nan instead of 0
     inside[inside == 0] = np.nan
     inside_p = inside / total
-    entries = inside.cumsum()
+
+    # Index of the first non nan value of inside
+    first_valid_value = np.argmax(~np.isnan(inside))
+    entries = np.nancumsum(inside)
+    entries[:first_valid_value] = np.nan
+
+    entries_pct = entries / total * 100
+
     # No values exit the ground
     # Use nan to avoid infinities
     exits = np.concat(([np.nan], entries[:-1]))
     ppi = exits / entries
 
-    vad = -np.log(ppi) * (1 / k) * (1 / z_bin_size)
+    vad = -np.log(ppi) / k
+    vad_norm = vad / z_bin_size
     vai = np.nansum(vad)
 
-    fhd =  - np.sum(inside_p * np.log(inside_p))
+    fhd = -np.sum(inside_p * np.log(inside_p))
     norm_fhd = fhd / len(inside_p)
+
+    # Compute VAI profiles
+    vai_profile = np.zeros(len(bins))
+    vai_slice = np.zeros(len(bins))
+
+    for i, threshold in enumerate(bins):
+        count_lte = weights[z <= threshold].sum()
+        if count_lte > 0:
+            vai_profile[i] = -np.log(count_lte / total) * (1 / k)
+        else:
+            vai_profile[i] = np.nan
+
+    vai_slice[0] = np.nan
+    for i, vai in enumerate(vai_profile[:-1]):
+        vai_above = vai_profile[i + 1]
+        vai_slice[i + 1] = vai - vai_above
 
     # Tuple metrics mean they are along
     # dimension z (i.e. 1D metrics - an array)
     metrics = {
         "inside": ("z", inside),
-        "inside_%": ("z", inside_p * 100),
-        "entries": ("z", entries), 
+        "inside_pct": ("z", inside_p * 100),
+        "entries": ("z", entries),
+        "entries_pct": ("z", entries_pct),
         "exits": ("z", exits),
         "ppi": ("z", ppi),
+        "vad_norm": ("z", vad_norm),
         "vad": ("z", vad),
+        "vai_profile": ("z", vai_profile),
+        "vai_slice": ("z", vai_slice),
         "vai": vai,
         "fhd": fhd,
-        "norm_fhd": norm_fhd
+        "norm_fhd": norm_fhd,
     }
 
     coords = {"z": bins}
@@ -230,21 +264,21 @@ def z_percentage_metrics(
     for op, a, *rest in percentages:
         b = rest[0] if rest else None
         if op == "at":
-            metrics[f"%at_{a}m"] = weights[z == a].sum() / total * 100
+            metrics[f"pct_at_{a}m"] = weights[z == a].sum() / total * 100
         elif op == "above":
-            metrics[f"%gt_{a}m"] = weights[z > a].sum() / total * 100
+            metrics[f"pct_gt_{a}m"] = weights[z > a].sum() / total * 100
         elif op == "above_inc":
-            metrics[f"%gte_{a}m"] = weights[z >= a].sum() / total * 100
+            metrics[f"pct_gte_{a}m"] = weights[z >= a].sum() / total * 100
         elif op == "below":
-            metrics[f"%lt_{a}m"] = weights[z < a].sum() / total * 100
+            metrics[f"pct_lt_{a}m"] = weights[z < a].sum() / total * 100
         elif op == "below_inc":
-            metrics[f"%lte_{a}m"] = weights[z <= a].sum() / total * 100
+            metrics[f"pct_lte_{a}m"] = weights[z <= a].sum() / total * 100
         elif op == "inside":
-            metrics[f"%inside_({a},{b}m]"] = (
+            metrics[f"pct_inside_({a},{b}m]"] = (
                 weights[(z > a) & (z <= b)].sum() / total * 100
             )
         elif op == "inside_inc":
-            metrics[f"%inside_[{a},{b}m]"] = (
+            metrics[f"pct_inside_[{a},{b}m]"] = (
                 weights[(z >= a) & (z <= b)].sum() / total * 100
             )
 
