@@ -3,7 +3,7 @@ import numpy.typing as npt
 
 import xarray as xr
 
-from scipy.stats import kurtosis, skew, entropy, lmoment
+from scipy.stats import kurtosis, skew, entropy
 from .typing import Percentages
 from .gini import gini
 
@@ -79,11 +79,6 @@ def forest_structure_metrics(
     metrics_ds.attrs["xy_bin_size"] = str(xy_bin_size)
     metrics_ds.attrs["z_bin_size"] = str(z_bin_size)
 
-    # float32 is enough for all my datavars
-    for name, var in metrics_ds.data_vars.items():
-        if var.dtype == "float64":
-            metrics_ds[name] = var.astype("float32")
-
     return metrics_ds
 
 
@@ -138,8 +133,8 @@ def basic_z_metrics(z: npt.NDArray[np.floating]):
     with np.errstate(divide="ignore", invalid="ignore"):
         crr = (mean - min) / range
 
-    skew_val = skew(z)  # TODO check these do what you think they do
-    kurt_val = kurtosis(z)  # TODO check these do what you think they do
+    skew_val = skew(z)
+    kurt_val = kurtosis(z)
     gini_val = gini(z)
 
     metrics = {
@@ -201,34 +196,36 @@ def z_bin_metrics(
     # Not in some literature k is used
     # however, its just a scalar so it can be applied in post if we want
     # similarly dz - though i think dz actually messes with the calculation
-    # of vai and should not be used
-    vad = -np.log(ppi) / z_bin_size
-    vai = np.nansum(vad) * z_bin_size
+    # of pai and should not be used
+    pad = -np.log(ppi) / z_bin_size
+
+    # Set ground to have 0 pulse penetration and 0 pad
+    ppi[0] = 0
+    pad[0] = 0
+
+    pai = np.nansum(pad) * z_bin_size
 
     fhd = entropy(inside_p, nan_policy="omit")
 
     with np.errstate(divide="ignore", invalid="ignore"):
         norm_fhd = fhd / np.log(((~np.isnan(inside_p)) & (inside_p > 0)).sum())
 
-    cv_inside = cv(inside)
     cv_inside_p = cv(inside_p)
     cv_ppi = cv(ppi)
-    cv_vad = cv(vad)
+    cv_pad = cv(pad)
 
     # Tuple metrics mean they are along
     # dimension z (i.e. 1D metrics - an array)
     metrics = {
-        "inside": ("z", inside),
         "inside_pct": ("z", inside_p * 100),
         "ppi": ("z", ppi),
-        "vad": ("z", vad),
-        "vai": vai,
+        "pad": ("z", pad),
+        "pai": pai,
         "fhd": fhd,
         "norm_fhd": norm_fhd,
-        "cv_inside": cv_inside,
         "cv_inside_p": cv_inside_p,
         "cv_ppi": cv_ppi,
-        "cv_vad": cv_vad,
+        "cv_pad": cv_pad,
     }
 
     coords = {"z": bins}
@@ -241,6 +238,9 @@ def z_percentile_metrics(z: npt.NDArray[np.floating], percentiles: npt.ArrayLike
     percentile_values = np.percentile(z, percentiles)
 
     for q, val in zip(percentiles, percentile_values):
+        if np.isnan(val):
+            raise ValueError("Val is nan q{q}: {val}")
+
         percentile_metrics[f"q{q}_h"] = val
 
     return percentile_metrics
