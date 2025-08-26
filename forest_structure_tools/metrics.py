@@ -27,6 +27,7 @@ def forest_structure_metrics(
     weights: npt.NDArray | None = None,
     xy_bin_size: float | None = None,
     z_bin_size: float | None = 1,
+    z_bin_count: float | None = 10,
     include_basic=True,
     percentiles: npt.NDArray[np.integer] = default_percentiles,
     percentages: Percentages | None = default_percentages,
@@ -52,6 +53,7 @@ def forest_structure_metrics(
         "percentiles": percentiles,
         "percentages": percentages,
         "z_bin_size": z_bin_size,
+        "z_bin_count": z_bin_count,
     }
 
     if xy_bin_size is None:
@@ -87,7 +89,8 @@ def forest_z_metrics_ds(
     include_basic=True,
     percentiles: npt.NDArray[np.integer] = None,
     percentages: Percentages | None = None,
-    z_bin_size: float | None = None,
+    z_bin_size: float | None = 1,
+    z_bin_count: float | None = 10,
 ):
     z = points_ds["z"].values
     weights = points_ds["weights"].values
@@ -106,6 +109,11 @@ def forest_z_metrics_ds(
 
     if z_bin_size is not None:
         m, c = z_bin_metrics(z, z_bin_size, weights=weights)
+        metrics |= m
+        coords |= c
+
+    if z_bin_count is not None:
+        m, c = qz_bin_metrics(z, z_bin_count, weights=weights)
         metrics |= m
         coords |= c
 
@@ -229,6 +237,87 @@ def z_bin_metrics(
     }
 
     coords = {"z": bins}
+
+    return (metrics, coords)
+
+
+def qz_bin_metrics(
+    z: npt.NDArray[np.floating],
+    z_bin_count: float = 20,
+    weights: npt.NDArray[np.floating] | None = None,
+):
+    if weights is None:
+        weights = np.ones(len(z))
+
+    total = weights.sum()
+
+    z_bin_size = z.max() / z_bin_count
+
+    # We use digitize over np.histogram because we want
+    # the special case of the first bin being just 0
+    labels = np.linspace(0, 100, z_bin_count + 1)
+    bins = np.linspace(0, z.max(), z_bin_count + 1)
+    # right=True means [,0] -> 0, (0, bin_size] -> 1
+    # i.e. z = 0 becomes index 0, z = 0.01 becomes index 1
+    bin_indices = np.digitize(z, bins, right=True)
+
+    # count # of returns inside each bin
+    inside = np.bincount(bin_indices, weights=weights, minlength=len(bins)).astype(
+        float
+    )
+
+    # Set any mising counts as nan instead of 0
+    inside[inside == 0] = np.nan
+    inside_p = inside / total
+
+    # Index of the first non nan value of inside
+    first_valid_value = np.argmax(~np.isnan(inside))
+    entries = np.nancumsum(inside)
+    entries[:first_valid_value] = np.nan
+
+    # entries_pct = entries / total * 100
+
+    # No values exit the ground
+    # Use nan to avoid infinities
+    exits = np.concat(([np.nan], entries[:-1]))
+    ppi = exits / entries
+
+    # Not in some literature k is used
+    # however, its just a scalar so it can be applied in post if we want
+    # similarly dz - though i think dz actually messes with the calculation
+    # of pai and should not be used
+    pad = -np.log(ppi) / z_bin_size
+
+    # Set ground to have 0 pulse penetration and 0 pad
+    ppi[0] = 0
+    pad[0] = 0
+
+    pai = np.nansum(pad) * z_bin_size
+
+    fhd = entropy(inside_p, nan_policy="omit")
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        norm_fhd = fhd / np.log(((~np.isnan(inside_p)) & (inside_p > 0)).sum())
+
+    cv_inside_p = cv(inside_p)
+    cv_ppi = cv(ppi)
+    cv_pad = cv(pad)
+
+    # Tuple metrics mean they are along
+    # dimension z (i.e. 1D metrics - an array)
+    metrics = {
+        "qz_inside_pct": ("qz", inside_p * 100),
+        "qz_ppi": ("qz", ppi),
+        "qz_pad": ("qz", pad),
+        "qz_pai": pai,
+        "qz_fhd": fhd,
+        "qz_norm_fhd": norm_fhd,
+        "qz_cv_inside_p": cv_inside_p,
+        "qz_cv_ppi": cv_ppi,
+        "qz_cv_pad": cv_pad,
+    }
+
+    coords = {"qz": labels}
 
     return (metrics, coords)
 
