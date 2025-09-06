@@ -44,6 +44,8 @@ def forest_structure_metrics(
         x_bins = np.arange(x_min, x.max() + xy_bin_size, xy_bin_size)
         y_bins = np.arange(y_min, y.max() + xy_bin_size, xy_bin_size)
 
+        # TODO  - Make labels the center
+
         x_bin_grouper = xr.groupers.BinGrouper(
             bins=x_bins, labels=x_bins[:-1], include_lowest=True
         )
