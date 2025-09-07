@@ -2,6 +2,7 @@ import numpy as np
 import numpy.typing as npt
 
 import xarray as xr
+import rioxarray
 
 from scipy.stats import kurtosis, skew
 from .gini import gini
@@ -76,6 +77,12 @@ def forest_structure_metrics(
 
     metrics_ds.attrs["xy_bin_size"] = str(xy_bin_size)
     metrics_ds.attrs["z_bin_size"] = str(z_bin_size)
+
+    # TODO - Un hardcode the CRS
+    # Add coordinate reference system and spatial dimensions
+    metrics_ds.rio.write_crs(7855, inplace=True)
+    metrics_ds.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=True)
+    metrics_ds.rio.write_coordinate_system(inplace=True)
 
     return metrics_ds
 
