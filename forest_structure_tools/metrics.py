@@ -212,6 +212,11 @@ def voxel_metric_vars(
     fhd = entropy(inside_count, nan_policy="omit")
     fhd_w = entropy(inside_weight, nan_policy="omit")
 
+    num_bins = len(bins)
+
+    vci = fhd / np.log(num_bins)
+    vci_w = fhd_w / np.log(num_bins)
+
     # Some cases enters will be 0 and the result will be NaN
     # This is desired as the voxel has been fully occluded
     # Separate from 0 when inside is 0 but some have passed
@@ -243,8 +248,12 @@ def voxel_metric_vars(
         "vox_rel_capture_w": ("z", rel_capture_w),
         "fhd": fhd,
         "fhd_w": fhd_w,
+        "vci": vci,
+        "vci_w": vci_w,
         "shann_capture": shann_capture,
         "shann_capture_w": shann_capture_w,
+        "norm_shann_capture": shann_capture / np.log(num_bins),
+        "norm_shann_capture_w": shann_capture_w / np.log(num_bins),
     }
 
     coords = {"z": bins}
