@@ -2,9 +2,8 @@ import numpy as np
 import numpy.typing as npt
 
 import xarray as xr
-import rioxarray
 
-from scipy.stats import kurtosis, skew
+from scipy.stats import kurtosis, skew, entropy
 from .gini import gini
 from .cv import cv
 
@@ -63,13 +62,15 @@ def forest_structure_metrics(
     # Group the dataset into x and y bins
     xy_grouping = create_xy_grouping(points_ds, xy_bin_size=xy_bin_size)
 
+    # Passing z max in makes calulating vertical profile easier
+    global_z_max = points_ds["z"].max().item()
+
     # Calculate forest metrics for each x,y bin
     metrics_ds = xy_grouping.map(
         forest_z_metrics_ds,
+        xy_bin_size=xy_bin_size,
         z_bin_size=z_bin_size,
-        global_z_max=points_ds["z"]
-        .max()
-        .item(),  # Passing z max in makes calulating vertical profile easier
+        global_z_max=global_z_max,
     )
 
     # Rename dimensions to x and y instead of x_bins and y_bins
@@ -78,21 +79,16 @@ def forest_structure_metrics(
     metrics_ds.attrs["xy_bin_size"] = str(xy_bin_size)
     metrics_ds.attrs["z_bin_size"] = str(z_bin_size)
 
-    # TODO - Un hardcode the CRS
-    # Add coordinate reference system and spatial dimensions
-    metrics_ds.rio.write_crs(7855, inplace=True)
-    metrics_ds.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=True)
-    metrics_ds.rio.write_coordinate_system(inplace=True)
-
     return metrics_ds
 
 
 def forest_z_metrics_ds(
     points_ds,
+    xy_bin_size: float = 1,
     z_bin_size: float = 1,
     global_z_max: float | None = None,
 ):
-    grid_metrics = grid_metric_vars(points_ds)
+    grid_metrics = grid_metric_vars(points_ds, xy_bin_size)
     voxel_metrics, voxel_z_coords = voxel_metric_vars(
         points_ds, z_bin_size, global_z_max=global_z_max
     )
@@ -104,14 +100,15 @@ def forest_z_metrics_ds(
 
 # Given a column of points to be reduced to a single value
 # Each column is a cell in the xy grid
-def grid_metric_vars(points_ds: xr.Dataset):
+def grid_metric_vars(points_ds: xr.Dataset, xy_bin_size=1):
     z = points_ds["z"].values
     rn = points_ds["return_number"].values
     weights = (1 / points_ds["number_of_returns"]).values
 
+    xy_area = xy_bin_size * xy_bin_size
+
     fr_mask = rn == 1
     veg_mask = z > 0
-    ground_mask = z == 0
 
     # Total number of points and pulses
     num_points = len(z)
@@ -119,16 +116,9 @@ def grid_metric_vars(points_ds: xr.Dataset):
 
     # Cover metrics for whole veg profile
     total_weight = weights.sum()
-    ground_count = ground_mask.sum()
-    ground_weight = weights[ground_mask].sum()
-    veg_count = veg_mask.sum()
-    veg_weight = weights[veg_mask].sum()
 
-    lgap = ground_count / num_points if num_points > 0 else np.nan
-    lgap_weight = ground_weight / total_weight if num_points > 0 else np.nan
-
-    lcapture = 1 - lgap if num_points > 0 else np.nan
-    lcapture_weight = 1 - lgap_weight if num_points > 0 else np
+    canopy_cover_1m = (z > 1).sum() / num_points
+    canopy_cover_1m_w = weights[z > 1].sum() / total_weight
 
     # Max, mean, median height use all points
     # 0 when highest point is ground
@@ -146,7 +136,6 @@ def grid_metric_vars(points_ds: xr.Dataset):
     num_veg_points = len(veg_z)
 
     sd_veg_height = veg_z.std() if num_veg_points >= 2 else np.nan
-    var_veg_height = veg_z.var() if num_veg_points >= 2 else np.nan
     cv_veg_height = cv(veg_z) if num_veg_points >= 2 else np.nan
     skew_veg_height = skew(veg_z) if num_veg_points >= 3 else np.nan
     kurt_veg_height = kurtosis(veg_z) if num_veg_points >= 4 else np.nan
@@ -159,28 +148,24 @@ def grid_metric_vars(points_ds: xr.Dataset):
     }
 
     return {
-        "num_points": num_points,
-        "num_pulses": num_pulses,
-        "total_weight": total_weight,
-        "ground_count": ground_count,
-        "ground_weight": ground_weight,
-        "veg_count": veg_count,
-        "veg_weight": veg_weight,
-        "lgap": lgap,
-        "lgap_weight": lgap_weight,
-        "lcapture": lcapture,
-        "lcapture_weight": lcapture_weight,
-        "max_height": max_height,
+        # Ancillary
+        "point_density": num_points / xy_area,
+        "pulse": num_pulses / xy_area,
+        # Height
+        "chm": max_height,
         "mean_height": mean_height,
         "median_height": median_height,
+        **percentile_metrics,
+        # Vertical Complexity
         "crr": crr,
         "sd_veg_height": sd_veg_height,
-        "var_veg_height": var_veg_height,
         "cv_veg_height": cv_veg_height,
         "skew_veg_height": skew_veg_height,
         "kurt_veg_height": kurt_veg_height,
         "gini_veg_height": gini_veg_height,
-        **percentile_metrics,
+        # Cover
+        "canopy_cover_1m": canopy_cover_1m,
+        "canopy_cover_1m_w": canopy_cover_1m_w,
     }
 
 
@@ -193,6 +178,9 @@ def voxel_metric_vars(
 ):
     z = points_ds["z"].values
     weights = (1 / points_ds["number_of_returns"]).values
+
+    total_count = len(z)
+    total_weight = weights.sum()
 
     z_max = global_z_max if global_z_max is not None else z.max()
 
@@ -210,37 +198,53 @@ def voxel_metric_vars(
         bin_indices, weights=weights, minlength=len(bins)
     ).astype(float)
 
+    rel_density = inside_count / total_count
+    rel_density_w = inside_weight / total_weight
+
     # Count the pulses that enter each voxel
     enter_count = np.nancumsum(inside_count)
     enter_weight = np.nancumsum(inside_weight)
 
     # Count the pulses that exit each voxel
-    exit_count = np.concat(([np.nan], enter_count[:-1]))
-    exit_weight = np.concat(([np.nan], enter_weight[:-1]))
+    # exit_count = np.concat(([np.nan], enter_count[:-1]))
+    # exit_weight = np.concat(([np.nan], enter_weight[:-1]))
+
+    fhd = entropy(inside_count, nan_policy="omit")
+    fhd_w = entropy(inside_weight, nan_policy="omit")
 
     # Some cases enters will be 0 and the result will be NaN
     # This is desired as the voxel has been fully occluded
     # Separate from 0 when inside is 0 but some have passed
     with np.errstate(divide="ignore", invalid="ignore"):
-        lgap = exit_count / enter_count
-        lgap_weight = exit_weight / enter_weight
         # Could also be 1 - lgap
-        lcapture = inside_count / enter_count
-        lcapture_weight = inside_weight / enter_weight
+        capture = inside_count / enter_count
+        capture_w = inside_weight / enter_weight
+
+    # Calc relative capture
+    rel_capture = capture / capture.sum()
+    rel_capture_w = capture_w / capture_w.sum()
+
+    # Entropy will normalise capture and capture w
+    shann_capture = entropy(capture, nan_policy="omit")
+    shann_capture_w = entropy(capture_w, nan_policy="omit")
 
     # Tuple metrics mean they are along
     # dimension z (i.e. 1D metrics - an array)
     metrics = {
-        "vox_inside_count": ("z", inside_count),
-        "vox_enter_count": ("z", enter_count),
-        "vox_exit_count": ("z", exit_count),
-        "vox_inside_weight": ("z", inside_weight),
-        "vox_enter_weight": ("z", enter_weight),
-        "vox_exit_weight": ("z", exit_weight),
-        "vox_lgap": ("z", lgap),
-        "vox_lgap_weight": ("z", lgap_weight),
-        "vox_lcapture": ("z", lcapture),
-        "vox_lcapture_weight": ("z", lcapture_weight),
+        "vox_inside": ("z", inside_count),
+        "vox_inside_w": ("z", inside_weight),
+        "vox_rel_density": ("z", rel_density),
+        "vox_rel_density_w": ("z", rel_density_w),
+        "vox_enter": ("z", enter_count),
+        "vox_enter_w": ("z", enter_weight),
+        "vox_capture": ("z", capture),
+        "vox_capture_w": ("z", capture_w),
+        "vox_rel_capture": ("z", rel_capture),
+        "vox_rel_capture_w": ("z", rel_capture_w),
+        "fhd": fhd,
+        "fhd_w": fhd_w,
+        "shann_capture": shann_capture,
+        "shann_capture_w": shann_capture_w,
     }
 
     coords = {"z": bins}
