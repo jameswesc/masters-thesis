@@ -150,7 +150,7 @@ def grid_metric_vars(points_ds: xr.Dataset, xy_bin_size=1):
     return {
         # Ancillary
         "point_density": num_points / xy_area,
-        "pulse": num_pulses / xy_area,
+        "pulse_density": num_pulses / xy_area,
         # Height
         "chm": max_height,
         "mean_height": mean_height,
