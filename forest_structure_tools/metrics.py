@@ -124,30 +124,34 @@ def grid_metric_vars(points_ds: xr.Dataset, xy_bin_size=1):
     canopy_cover_1m = (z > 1).sum() / num_points
     canopy_cover_1m_w = weights[z > 1].sum() / total_weight
 
-    # Max, mean, median height use all points
-    # 0 when highest point is ground
-    # nan when no points
-    max_height = z.max() if num_points > 0 else np.nan
-    mean_height = z.mean() if num_points > 0 else np.nan
-    median_height = np.median(z) if num_points > 0 else np.nan
-
-    crr = mean_height / max_height if max_height > 0 else np.nan
-
     # Basic vertical complexity summary stats for veg points only
     # e.g. not interested in standard deviation if all points are ground
     # points (and thus have z of 0)
     veg_z = z[veg_mask]
     num_veg_points = len(veg_z)
 
-    sd_veg_height = veg_z.std() if num_veg_points >= 2 else np.nan
-    cv_veg_height = cv(veg_z) if num_veg_points >= 2 else np.nan
-    skew_veg_height = skew(veg_z) if num_veg_points >= 3 else np.nan
-    kurt_veg_height = kurtosis(veg_z) if num_veg_points >= 4 else np.nan
-    gini_veg_height = gini(veg_z) if num_veg_points >= 2 else np.nan
+    # If there are no points at all, max, mean and median veg height
+    # will be nan.
+    if num_points == 0:
+        veg_height_max = np.nan
+        veg_height_mean = np.nan
+        veg_height_median = np.nan
+    else:
+        veg_height_max = veg_z.max() if num_veg_points > 0 else np.nan
+        veg_height_mean = veg_z.mean() if num_veg_points > 0 else np.nan
+        veg_height_median = np.median(veg_z) if num_veg_points > 0 else np.nan
+
+    crr = veg_height_mean / veg_height_max if veg_height_max > 0 else np.nan
+
+    veg_height_sd = veg_z.std() if num_veg_points >= 2 else np.nan
+    veg_height_cv = cv(veg_z) if num_veg_points >= 2 else np.nan
+    veg_height_skew = skew(veg_z) if num_veg_points >= 3 else np.nan
+    veg_height_kurt = kurtosis(veg_z) if num_veg_points >= 4 else np.nan
+    veg_height_gini = gini(veg_z) if num_veg_points >= 2 else np.nan
 
     # Veg height for every 10th percentile
     percentile_metrics = {
-        f"q{p}_veg_height": (np.percentile(veg_z, p) if num_veg_points > 0 else np.nan)
+        f"veg_height_q{p}": (np.percentile(veg_z, p) if num_veg_points > 0 else np.nan)
         for p in np.arange(10, 100, 10)
     }
 
@@ -157,20 +161,20 @@ def grid_metric_vars(points_ds: xr.Dataset, xy_bin_size=1):
         "pulse_density": num_pulses / xy_area,
         "scan_angle_mean": scan_angle_mean,
         # Height
-        "chm": max_height,
-        "mean_height": mean_height,
-        "median_height": median_height,
+        "chm": veg_height_max,
+        "veg_height_mean": veg_height_mean,
+        "veg_height_median": veg_height_median,
         **percentile_metrics,
         # Vertical Complexity
         "crr": crr,
-        "sd_veg_height": sd_veg_height,
-        "cv_veg_height": cv_veg_height,
-        "skew_veg_height": skew_veg_height,
-        "kurt_veg_height": kurt_veg_height,
-        "gini_veg_height": gini_veg_height,
+        "veg_height_sd": veg_height_sd,
+        "veg_height_cv": veg_height_cv,
+        "veg_height_skew": veg_height_skew,
+        "veg_height_kurt": veg_height_kurt,
+        "veg_height_gini": veg_height_gini,
         # Cover
-        "canopy_cover_1m": canopy_cover_1m,
-        "canopy_cover_1m_w": canopy_cover_1m_w,
+        "canopy_cover_gt1m": canopy_cover_1m,
+        "canopy_cover_gt1m_w": canopy_cover_1m_w,
     }
 
 
