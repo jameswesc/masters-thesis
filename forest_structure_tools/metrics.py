@@ -17,6 +17,7 @@ def create_points_ds(points_array: npt.NDArray) -> xr.Dataset:
         "z": ("idx", points_array["Z"]),
         "return_number": ("idx", points_array["ReturnNumber"]),
         "number_of_returns": ("idx", points_array["NumberOfReturns"]),
+        "scan_angle_rank": ("idx", points_array["ScanAngleRank"]),
     }
 
     points_ds = xr.Dataset(data_vars=point_ds_data_vars)
@@ -104,6 +105,9 @@ def grid_metric_vars(points_ds: xr.Dataset, xy_bin_size=1):
     z = points_ds["z"].values
     rn = points_ds["return_number"].values
     weights = (1 / points_ds["number_of_returns"]).values
+    scan_angle = points_ds["scan_angle_rank"]
+
+    scan_angle_mean = scan_angle.mean()
 
     xy_area = xy_bin_size * xy_bin_size
 
@@ -151,6 +155,7 @@ def grid_metric_vars(points_ds: xr.Dataset, xy_bin_size=1):
         # Ancillary
         "point_density": num_points / xy_area,
         "pulse_density": num_pulses / xy_area,
+        "scan_angle_mean": scan_angle_mean,
         # Height
         "chm": max_height,
         "mean_height": mean_height,
