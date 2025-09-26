@@ -6,3 +6,9 @@
 __pycache__
 
 data
+
+# Large files
+*.nc
+*.tif
+*.parquet
+*.laz
